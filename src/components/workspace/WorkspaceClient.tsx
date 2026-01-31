@@ -31,6 +31,7 @@ import { cn } from '@/lib/utils';
 
 interface WorkspaceClientProps {
   workspace: Workspace;
+  domain: string;
 }
 
 type PanelType = 'opencode' | 'vscode' | 'preview';
@@ -46,7 +47,7 @@ const PANELS: { id: PanelType; label: string; icon: React.ReactNode; shortcut: s
 // Base64 encode "/workspace" for OpenCode URL
 const WORKSPACE_PATH_ENCODED = btoa('/workspace').replace(/=/g, '');
 
-export default function WorkspaceClient({ workspace }: WorkspaceClientProps) {
+export default function WorkspaceClient({ workspace, domain }: WorkspaceClientProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,8 +66,6 @@ export default function WorkspaceClient({ workspace }: WorkspaceClientProps) {
   const opencodeCheckRef = useRef<NodeJS.Timeout | null>(null);
   const vscodeCheckRef = useRef<NodeJS.Timeout | null>(null);
   const opencodeIframeRef = useRef<HTMLIFrameElement | null>(null);
-
-  const domain = process.env.NEXT_PUBLIC_DOMAIN || 'localhost';
   
   // URLs are based on workspace ID, not ports (Traefik routes by hostname)
   const opencodeBaseUrl = `http://opencode-${workspace.id}.${domain}`;

@@ -26,5 +26,7 @@ export default async function WorkspacePage({
     redirect('/dashboard');
   }
 
-  return <WorkspaceClient workspace={workspace} />;
+  const domain = process.env.DOMAIN || 'localhost';
+
+  return <WorkspaceClient workspace={workspace} domain={domain} />;
 }
