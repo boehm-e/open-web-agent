@@ -92,6 +92,8 @@ services:
       DOMAIN: ${DOMAIN:-localhost}
       WORKSPACE_BASE_PORT: ${WORKSPACE_BASE_PORT:-4000}
       VSCODE_BASE_PORT: ${VSCODE_BASE_PORT:-5000}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
     networks:
       - web
     depends_on:
