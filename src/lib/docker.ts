@@ -1,4 +1,5 @@
 import Docker from 'dockerode';
+import { prisma } from './prisma';
 
 // Initialize Docker client - connect to docker-socket-proxy via TCP
 const docker = new Docker({
@@ -47,6 +48,7 @@ async function pullImageIfNeeded(imageName: string): Promise<void> {
 
 export interface WorkspaceContainerConfig {
   workspaceId: string;
+  userId: string;
   githubRepo: string;
   githubBranch?: string;
   githubToken?: string;
@@ -56,6 +58,7 @@ export interface WorkspaceContainerConfig {
 export async function createWorkspaceContainer(config: WorkspaceContainerConfig) {
   const {
     workspaceId,
+    userId,
     githubRepo,
     githubBranch = 'main',
     githubToken,
@@ -96,21 +99,41 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
       },
     });
 
+    // Fetch user's skills from database
+    const skills = await (prisma as any).skill.findMany({
+      where: { userId },
+    });
+
     // Create dedicated network for this workspace
     await docker.createNetwork({
       Name: networkName,
       Driver: 'bridge',
     });
 
-    // Create and run an init container to clone the repository into the volume
+    // Build skills setup commands for the opencode container
+    // Skills are placed in ~/.config/opencode/skills/<name>/SKILL.md (global config location)
+    const skillsSetupCommands = skills.length > 0
+      ? skills.map((skill: { name: string; content: string }) => {
+          const skillDir = `/root/.config/opencode/skills/${skill.name}`;
+          // Use base64 to handle complex content with special characters
+          const escapedContent = Buffer.from(skill.content).toString('base64');
+          return `mkdir -p ${skillDir} && echo '${escapedContent}' | base64 -d > ${skillDir}/SKILL.md`;
+        }).join(' && ')
+      : '';
+
+    // Create and run an init container to clone the repository
     const initContainer = await docker.createContainer({
       name: `init-${workspaceId}`,
       Image: gitImage,
+      Entrypoint: ['sh', '-c'],
       Cmd: [
-        'clone', '--branch', githubBranch, repoUrl, '/workspace'
+        // Clone repo only - skills are set up in the opencode container
+        `git clone --branch ${githubBranch} ${repoUrl} /workspace`
       ],
       HostConfig: {
-        Binds: [`${volumeName}:/workspace`],
+        Binds: [
+          `${volumeName}:/workspace`
+        ],
         AutoRemove: false,
       },
       Labels: {
@@ -118,6 +141,7 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
         'workspace.type': 'init',
       },
     });
+
 
     // Start init container and wait for completion
     await initContainer.start();
@@ -210,16 +234,21 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
       Env: opencodeEnv,
       Entrypoint: ['sh', '-c'],
       Cmd: [
-        // Install git and github-cli, then run opencode
+        // Install git and github-cli, set up skills in ~/.config/opencode/skills, then run opencode
         // Git credentials are configured via GITHUB_TOKEN/GH_TOKEN env vars
-        `apk add --no-cache git github-cli && cd /workspace && exec opencode web --port 3001 --hostname 0.0.0.0`
+        `apk add --no-cache git github-cli` +
+        (skillsSetupCommands ? ` && ${skillsSetupCommands}` : '') +
+        ` && cd /workspace && exec opencode web --port 3001 --hostname 0.0.0.0`
       ],
       ExposedPorts: {
         '3001/tcp': {},
       },
       HostConfig: {
         // No PortBindings - Traefik routes via Docker network, no host ports needed
-        Binds: [`${volumeName}:/workspace`],
+        // Skills are set up in ~/.config/opencode/skills/ during container startup
+        Binds: [
+          `${volumeName}:/workspace`
+        ],
         NetworkMode: networkName,
         RestartPolicy: {
           Name: 'unless-stopped',
@@ -227,6 +256,7 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
         Memory: 4 * 1024 * 1024 * 1024,
         NanoCpus: 2 * 1000000000,
       },
+
       Labels: {
         'traefik.enable': 'true',
         'traefik.docker.network': mainNetwork,
@@ -351,6 +381,7 @@ async function cleanupWorkspace(workspaceId: string) {
     // Volume might not exist
   }
 }
+
 
 export async function getContainerStatus(workspaceId: string) {
   try {

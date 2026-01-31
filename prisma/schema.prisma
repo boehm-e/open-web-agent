@@ -19,6 +19,7 @@ model User {
   githubId      String?     @unique
   githubToken   String?     @db.Text
   workspaces    Workspace[]
+  skills        Skill[]
   accounts      Account[]
   sessions      Session[]
   createdAt     DateTime    @default(now())
@@ -84,4 +85,23 @@ model Workspace {
 
   @@index([userId])
   @@map("workspaces")
+}
+
+model Skill {
+  id          String   @id @default(cuid())
+  name        String   // Must match: ^[a-z0-9]+(-[a-z0-9]+)*$ (1-64 chars)
+  description String   @db.Text // 1-1024 characters
+  content     String   @db.Text // Full SKILL.md content including frontmatter
+  license     String?  // Optional: MIT, Apache-2.0, etc.
+  compatibility String? // Optional: opencode, claude, etc.
+  metadata    Json?    // Optional: string-to-string map
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isGlobal    Boolean  @default(false) // If true, apply to all user's workspaces
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, name]) // Each user can have only one skill with a given name
+  @@index([userId])
+  @@map("skills")
 }

@@ -66,10 +66,12 @@ export async function POST(request: NextRequest) {
       // No ports needed - Traefik routes via Docker network using container labels
       const containerInfo = await createWorkspaceContainer({
         workspaceId: workspace.id,
+        userId: session.user.id,
         githubRepo,
         githubBranch,
         githubToken: session.user.githubToken || undefined,
       });
+
 
       // Update workspace with container info
       const updatedWorkspace = await prisma.workspace.update({

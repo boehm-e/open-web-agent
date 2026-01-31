@@ -22,7 +22,9 @@ import {
   Settings,
   User,
   ChevronDown,
+  Brain,
 } from 'lucide-react';
+
 import { useRouter } from 'next/navigation';
 import type { Workspace } from '@prisma/client';
 import CreateWorkspaceDialog from './CreateWorkspaceDialog';
@@ -223,12 +225,20 @@ export default function DashboardClient({ user, initialWorkspaces }: DashboardCl
                           <ThemeToggle className="w-full justify-center" />
                         </div>
                         <button
+                          onClick={() => router.push('/skills')}
+                          className="w-full flex items-center gap-2 px-2 py-2 text-sm text-foreground hover:bg-muted rounded-md transition-colors"
+                        >
+                          <Brain className="w-4 h-4 text-primary" />
+                          AI Skills
+                        </button>
+                        <button
                           onClick={() => signOut({ callbackUrl: '/login' })}
                           className="w-full flex items-center gap-2 px-2 py-2 text-sm text-destructive hover:bg-destructive/10 rounded-md transition-colors"
                         >
                           <LogOut className="w-4 h-4" />
                           Sign Out
                         </button>
+
                       </div>
                     </div>
                   </>
@@ -242,7 +252,7 @@ export default function DashboardClient({ user, initialWorkspaces }: DashboardCl
       {/* Main Content */}
       <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <Card className="bg-card/50">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
@@ -280,6 +290,24 @@ export default function DashboardClient({ user, initialWorkspaces }: DashboardCl
                 </div>
                 <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center">
                   <Clock className="w-6 h-6 text-muted-foreground" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card 
+            className="bg-gradient-to-br from-purple-500/10 to-blue-500/10 border-purple-500/20 hover:border-purple-500/40 cursor-pointer transition-all"
+            onClick={() => router.push('/skills')}
+          >
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-purple-500">
+                    AI Skills
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">Configure agent behaviors</p>
+                </div>
+                <div className="w-12 h-12 rounded-full bg-purple-500/20 flex items-center justify-center">
+                  <Brain className="w-6 h-6 text-purple-500" />
                 </div>
               </div>
             </CardContent>
