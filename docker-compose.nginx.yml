@@ -1,0 +1,18 @@
+# Docker Compose override for nginx reverse proxy deployment
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.nginx.yml up -d
+#
+# This removes Traefik and exposes the web app directly for nginx to proxy.
+# Set in your .env:
+#   WEB_PORT=4004  (or any available port)
+#   DOMAIN=your-domain.com
+#   NEXTAUTH_URL=https://your-domain.com
+
+services:
+  traefik:
+    deploy:
+      replicas: 0  # Disable traefik
+
+  web:
+    ports:
+      - "${WEB_PORT:-4004}:3000"
+    labels: []  # Remove traefik labels

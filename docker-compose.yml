@@ -102,13 +102,7 @@ services:
       - "traefik.http.routers.web.rule=Host(`${DOMAIN:-localhost}`)"
       - "traefik.http.routers.web.entrypoints=web"
       - "traefik.http.services.web.loadbalancer.server.port=3000"
-      # Disable buffering for SSE/streaming
-      - "traefik.http.middlewares.web-buffering.buffering.maxRequestBodyBytes=0"
-      - "traefik.http.middlewares.web-buffering.buffering.maxResponseBodyBytes=0"
-      - "traefik.http.middlewares.web-buffering.buffering.memRequestBodyBytes=0"
-      - "traefik.http.middlewares.web-buffering.buffering.memResponseBodyBytes=0"
-      - "traefik.http.routers.web.middlewares=web-buffering"
-      # WebSocket support - passHostHeader for proper upgrade handling
+      # WebSocket support
       - "traefik.http.services.web.loadbalancer.passHostHeader=true"
     restart: unless-stopped
 
