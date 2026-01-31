@@ -78,7 +78,8 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
   // Image names
   const gitImage = 'alpine/git:latest';
   const codeServerImage = 'codercom/code-server:latest';
-  const opencodeImage = 'ghcr.io/anomalyco/opencode:latest';
+  const opencodeImage = 'ghcr.io/anomalyco/opencode:0.0.0-beta-202601311004';
+  // const opencodeImage = 'ghcr.io/anomalyco/opencode:latest';
 
   try {
     // Pull all required images first
@@ -104,6 +105,16 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
       where: { userId },
     });
 
+    // Fetch user's LLM providers and models from database
+    const providers = await (prisma as any).lLMProvider.findMany({
+      where: { userId, isEnabled: true },
+      include: {
+        models: {
+          where: { isEnabled: true },
+        },
+      },
+    });
+
     // Create dedicated network for this workspace
     await docker.createNetwork({
       Name: networkName,
@@ -114,12 +125,80 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
     // Skills are placed in ~/.config/opencode/skills/<name>/SKILL.md (global config location)
     const skillsSetupCommands = skills.length > 0
       ? skills.map((skill: { name: string; content: string }) => {
-          const skillDir = `/root/.config/opencode/skills/${skill.name}`;
-          // Use base64 to handle complex content with special characters
-          const escapedContent = Buffer.from(skill.content).toString('base64');
-          return `mkdir -p ${skillDir} && echo '${escapedContent}' | base64 -d > ${skillDir}/SKILL.md`;
-        }).join(' && ')
+        const skillDir = `/root/.config/opencode/skills/${skill.name}`;
+        // Use base64 to handle complex content with special characters
+        const escapedContent = Buffer.from(skill.content).toString('base64');
+        return `mkdir -p ${skillDir} && echo '${escapedContent}' | base64 -d > ${skillDir}/SKILL.md`;
+      }).join(' && ')
       : '';
+
+    // Build opencode.json configuration for LLM providers
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const opencodeConfig: any = {
+      $schema: 'https://opencode.ai/config.json',
+      provider: {},
+      enabled_providers: [],
+      disabled_providers: [],
+    };
+
+    // Find default model across all providers
+    const defaultProvider = providers.find((p: { isDefault: boolean }) => p.isDefault);
+    const defaultModel = defaultProvider?.models.find((m: { isDefault: boolean }) => m.isDefault);
+
+    if (defaultModel && defaultProvider) {
+      // Use the native provider name and model ID
+      const providerKey = defaultProvider.providerId.toLowerCase();
+      opencodeConfig.model = `${providerKey}/${defaultModel.modelId}`;
+    }
+
+    // Build provider configuration using native OpenCode providers
+    if (providers.length > 0) {
+      for (const provider of providers) {
+        const providerKey = provider.providerId.toLowerCase();
+        
+        // Add to enabled providers
+        opencodeConfig.enabled_providers.push(providerKey);
+
+        // Configure provider options
+        opencodeConfig.provider[providerKey] = {
+          options: {}
+        };
+
+        if (provider.baseUrl) {
+          opencodeConfig.provider[providerKey].options.baseURL = provider.baseUrl;
+        }
+
+        if (provider.envVarName) {
+          opencodeConfig.provider[providerKey].options.apiKey = `{env:${provider.envVarName}}`;
+        }
+
+        // Add any custom headers
+        if (provider.headers && Object.keys(provider.headers).length > 0) {
+          const customHeaders = { ...provider.headers };
+          delete customHeaders.Authorization;
+          
+          if (Object.keys(customHeaders).length > 0) {
+            opencodeConfig.provider[providerKey].options.headers = 
+              opencodeConfig.provider[providerKey].options.headers || {};
+            Object.assign(opencodeConfig.provider[providerKey].options.headers, customHeaders);
+          }
+        }
+
+        // Note: We don't explicitly list models here anymore as OpenCode 
+        // will use the enabled providers to discover them or use the default model string.
+      }
+
+      // Explicitly disable common providers that aren't enabled to avoid confusion
+      const allPossibleProviders = ["openai", "anthropic", "google", "groq", "openrouter", "mistral", "together", "deepseek", "xai", "ollama", "lmstudio"];
+      opencodeConfig.disabled_providers = allPossibleProviders.filter(p => !opencodeConfig.enabled_providers.includes(p));
+    }
+
+    // Generate opencode.json content
+    const opencodeConfigJson = JSON.stringify(opencodeConfig, null, 2);
+    const opencodeConfigBase64 = Buffer.from(opencodeConfigJson).toString('base64');
+
+    // Command to write opencode.json to ~/.config/opencode/
+    const opencodeConfigCommand = `mkdir -p /root/.config/opencode && echo '${opencodeConfigBase64}' | base64 -d > /root/.config/opencode/opencode.json`;
 
     // Create and run an init container to clone the repository
     const initContainer = await docker.createContainer({
@@ -227,6 +306,13 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
       opencodeEnv.push(`GH_TOKEN=${githubToken}`); // gh cli uses this
     }
 
+    // Add API keys from providers as environment variables
+    for (const provider of providers) {
+      if (provider.apiKey && provider.envVarName) {
+        opencodeEnv.push(`${provider.envVarName}=${provider.apiKey}`);
+      }
+    }
+
     // Create OpenCode container
     const opencodeContainer = await docker.createContainer({
       name: `opencode-${workspaceId}`,
@@ -234,9 +320,11 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
       Env: opencodeEnv,
       Entrypoint: ['sh', '-c'],
       Cmd: [
-        // Install git and github-cli, set up skills in ~/.config/opencode/skills, then run opencode
+        // Install git and github-cli, set up opencode.json config, set up skills, then run opencode
         // Git credentials are configured via GITHUB_TOKEN/GH_TOKEN env vars
+        // LLM provider API keys are configured via environment variables
         `apk add --no-cache git github-cli` +
+        ` && ${opencodeConfigCommand}` +
         (skillsSetupCommands ? ` && ${skillsSetupCommands}` : '') +
         ` && cd /workspace && exec opencode web --port 3001 --hostname 0.0.0.0`
       ],

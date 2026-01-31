@@ -11,19 +11,20 @@ datasource db {
 }
 
 model User {
-  id            String      @id @default(cuid())
-  email         String?     @unique
+  id            String        @id @default(cuid())
+  email         String?       @unique
   emailVerified DateTime?
   name          String?
   image         String?
-  githubId      String?     @unique
-  githubToken   String?     @db.Text
+  githubId      String?       @unique
+  githubToken   String?       @db.Text
   workspaces    Workspace[]
   skills        Skill[]
+  llmProviders  LLMProvider[]
   accounts      Account[]
   sessions      Session[]
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   @@map("users")
 }
@@ -104,4 +105,64 @@ model Skill {
   @@unique([userId, name]) // Each user can have only one skill with a given name
   @@index([userId])
   @@map("skills")
+}
+
+// Known provider types that have simplified UI
+enum ProviderType {
+  OPENAI
+  ANTHROPIC
+  GOOGLE
+  OPENROUTER
+  AZURE_OPENAI
+  AWS_BEDROCK
+  OLLAMA
+  LMSTUDIO
+  GROQ
+  TOGETHER
+  MISTRAL
+  DEEPSEEK
+  XAI
+  CUSTOM
+}
+
+model LLMProvider {
+  id          String       @id @default(cuid())
+  name        String       // Display name for the provider
+  providerId  String       // Provider ID used in opencode config (e.g., "openai", "my-custom")
+  type        ProviderType @default(CUSTOM)
+  baseUrl     String?      // Base URL for API (required for CUSTOM, optional for known providers)
+  apiKey      String?      @db.Text // Encrypted API key
+  envVarName  String?      // Environment variable name for API key (e.g., OPENAI_API_KEY)
+  headers     Json?        // Additional headers for requests
+  options     Json?        // Additional provider options (timeout, retries, etc.)
+  isEnabled   Boolean      @default(true)
+  isDefault   Boolean      @default(false) // If true, this is the user's default provider
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  models      LLMModel[]   // Models available from this provider
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([userId, providerId]) // Each user can have only one provider with a given ID
+  @@index([userId])
+  @@map("llm_providers")
+}
+
+model LLMModel {
+  id          String      @id @default(cuid())
+  modelId     String      // Model ID used in opencode config (e.g., "gpt-4", "claude-sonnet-4-5")
+  name        String      // Display name for the model
+  description String?     @db.Text
+  providerId  String
+  provider    LLMProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  isEnabled   Boolean     @default(true)
+  isDefault   Boolean     @default(false) // If true, this is the default model for the provider
+  options     Json?       // Model-specific options (thinking budget, reasoning effort, etc.)
+  variants    Json?       // Model variants configuration
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@unique([providerId, modelId]) // Each provider can have only one model with a given ID
+  @@index([providerId])
+  @@map("llm_models")
 }

@@ -23,6 +23,7 @@ import {
   User,
   ChevronDown,
   Brain,
+  Server,
 } from 'lucide-react';
 
 import { useRouter } from 'next/navigation';
@@ -232,6 +233,13 @@ export default function DashboardClient({ user, initialWorkspaces }: DashboardCl
                           AI Skills
                         </button>
                         <button
+                          onClick={() => router.push('/providers')}
+                          className="w-full flex items-center gap-2 px-2 py-2 text-sm text-foreground hover:bg-muted rounded-md transition-colors"
+                        >
+                          <Server className="w-4 h-4 text-primary" />
+                          LLM Providers
+                        </button>
+                        <button
                           onClick={() => signOut({ callbackUrl: '/login' })}
                           className="w-full flex items-center gap-2 px-2 py-2 text-sm text-destructive hover:bg-destructive/10 rounded-md transition-colors"
                         >
@@ -252,7 +260,7 @@ export default function DashboardClient({ user, initialWorkspaces }: DashboardCl
       {/* Main Content */}
       <main className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 mb-8">
           <Card className="bg-card/50">
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
@@ -308,6 +316,24 @@ export default function DashboardClient({ user, initialWorkspaces }: DashboardCl
                 </div>
                 <div className="w-12 h-12 rounded-full bg-purple-500/20 flex items-center justify-center">
                   <Brain className="w-6 h-6 text-purple-500" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card 
+            className="bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border-blue-500/20 hover:border-blue-500/40 cursor-pointer transition-all"
+            onClick={() => router.push('/providers')}
+          >
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-blue-500">
+                    LLM Providers
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">Configure AI models</p>
+                </div>
+                <div className="w-12 h-12 rounded-full bg-blue-500/20 flex items-center justify-center">
+                  <Server className="w-6 h-6 text-blue-500" />
                 </div>
               </div>
             </CardContent>
