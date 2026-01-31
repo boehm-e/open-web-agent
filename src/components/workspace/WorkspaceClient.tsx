@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Keyboard,
   AlertCircle,
+  Eye,
 } from 'lucide-react';
 import type { Workspace } from '@prisma/client';
 import { Button } from '@/components/ui/Button';
@@ -32,8 +33,15 @@ interface WorkspaceClientProps {
   workspace: Workspace;
 }
 
-type ActivePanel = 'both' | 'opencode' | 'vscode';
+type PanelType = 'opencode' | 'vscode' | 'preview';
 type LayoutMode = 'horizontal' | 'vertical';
+
+// Panel configurations
+const PANELS: { id: PanelType; label: string; icon: React.ReactNode; shortcut: string }[] = [
+  { id: 'opencode', label: 'OpenCode', icon: <Bot className="w-3.5 h-3.5" />, shortcut: 'Alt+2' },
+  { id: 'vscode', label: 'VS Code', icon: <Code className="w-3.5 h-3.5" />, shortcut: 'Alt+3' },
+  { id: 'preview', label: 'Preview', icon: <Eye className="w-3.5 h-3.5" />, shortcut: 'Alt+4' },
+];
 
 // Base64 encode "/workspace" for OpenCode URL
 const WORKSPACE_PATH_ENCODED = btoa('/workspace').replace(/=/g, '');
@@ -43,7 +51,9 @@ export default function WorkspaceClient({ workspace }: WorkspaceClientProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [activePanel, setActivePanel] = useState<ActivePanel>('both');
+  // Split view: [leftPanel, rightPanel] or single panel if rightPanel is null
+  const [leftPanel, setLeftPanel] = useState<PanelType>('opencode');
+  const [rightPanel, setRightPanel] = useState<PanelType | null>('vscode');
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('horizontal');
   const [showHeader, setShowHeader] = useState(true);
   const [iframeKey, setIframeKey] = useState(0);
@@ -51,17 +61,24 @@ export default function WorkspaceClient({ workspace }: WorkspaceClientProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [opencodeReady, setOpencodeReady] = useState(false);
   const [vscodeReady, setVscodeReady] = useState(false);
+  const [opencodeSessionId, setOpencodeSessionId] = useState<string | null>(null);
   const opencodeCheckRef = useRef<NodeJS.Timeout | null>(null);
   const vscodeCheckRef = useRef<NodeJS.Timeout | null>(null);
+  const opencodeIframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const domain = process.env.NEXT_PUBLIC_DOMAIN || 'localhost';
   
   // URLs are based on workspace ID, not ports (Traefik routes by hostname)
   const opencodeBaseUrl = `http://opencode-${workspace.id}.${domain}`;
-  // OpenCode URL with workspace path (base64 encoded)
-  const opencodeUrl = `${opencodeBaseUrl}/${WORKSPACE_PATH_ENCODED}/session`;
+  // OpenCode URL - include session ID if we have one persisted
+  const opencodeUrl = opencodeSessionId
+    ? `${opencodeBaseUrl}/${WORKSPACE_PATH_ENCODED}/session/${opencodeSessionId}`
+    : `${opencodeBaseUrl}/${WORKSPACE_PATH_ENCODED}/session`;
   
   const vscodeUrl = `http://vscode-${workspace.id}.${domain}`;
+  
+  // Preview URL for live dev server (port 3000 in container)
+  const previewUrl = `http://preview-${workspace.id}.${domain}`;
 
   const copyPassword = async () => {
     if (workspace.vscodePassword) {
@@ -87,20 +104,49 @@ export default function WorkspaceClient({ workspace }: WorkspaceClientProps) {
     }
   }, []);
 
+  // Helper to select a panel (click = single, shift+click = add to split)
+  const selectPanel = useCallback((panel: PanelType, addToSplit = false) => {
+    if (addToSplit && rightPanel === null) {
+      // Add to split view
+      if (leftPanel !== panel) {
+        setRightPanel(panel);
+      }
+    } else if (addToSplit && rightPanel !== null) {
+      // Replace right panel in split
+      if (leftPanel !== panel) {
+        setRightPanel(panel);
+      }
+    } else {
+      // Single panel mode
+      setLeftPanel(panel);
+      setRightPanel(null);
+    }
+  }, [leftPanel, rightPanel]);
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.altKey && e.key === '1') {
         e.preventDefault();
-        setActivePanel('both');
+        // Toggle split: if single, make split with opencode+vscode; if split, go single
+        if (rightPanel === null) {
+          setLeftPanel('opencode');
+          setRightPanel('vscode');
+        } else {
+          setRightPanel(null);
+        }
       }
       if (e.altKey && e.key === '2') {
         e.preventDefault();
-        setActivePanel('opencode');
+        selectPanel('opencode', e.shiftKey);
       }
       if (e.altKey && e.key === '3') {
         e.preventDefault();
-        setActivePanel('vscode');
+        selectPanel('vscode', e.shiftKey);
+      }
+      if (e.altKey && e.key === '4') {
+        e.preventDefault();
+        selectPanel('preview', e.shiftKey);
       }
       if (e.altKey && e.key === 'h') {
         e.preventDefault();
@@ -122,7 +168,7 @@ export default function WorkspaceClient({ workspace }: WorkspaceClientProps) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleFullscreen]);
+  }, [toggleFullscreen, selectPanel, rightPanel]);
 
   // Fullscreen change listener
   useEffect(() => {
@@ -157,6 +203,69 @@ export default function WorkspaceClient({ workspace }: WorkspaceClientProps) {
 
     return () => clearInterval(interval);
   }, [workspace.id]);
+
+  // Fetch persisted OpenCode session ID on mount and poll for new sessions
+  useEffect(() => {
+    let sessionPollInterval: NodeJS.Timeout | null = null;
+    
+    const fetchSessionId = async () => {
+      try {
+        // First check if we have a persisted session ID
+        const response = await fetch(`/api/workspaces/${workspace.id}/session`);
+        const data = await response.json();
+        if (data.sessionId) {
+          setOpencodeSessionId(data.sessionId);
+          // Stop polling if we have a session
+          if (sessionPollInterval) {
+            clearInterval(sessionPollInterval);
+            sessionPollInterval = null;
+          }
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      }
+    };
+    
+    const pollForNewSession = async () => {
+      try {
+        // Try to get the most recent session from OpenCode API
+        const opencodeResponse = await fetch(`/api/workspaces/${workspace.id}/opencode-session`);
+        const opencodeData = await opencodeResponse.json();
+        if (opencodeData.sessionId && opencodeData.sessionId !== opencodeSessionId) {
+          setOpencodeSessionId(opencodeData.sessionId);
+          // Persist it
+          await fetch(`/api/workspaces/${workspace.id}/session`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId: opencodeData.sessionId }),
+          });
+          // Stop polling
+          if (sessionPollInterval) {
+            clearInterval(sessionPollInterval);
+            sessionPollInterval = null;
+          }
+        }
+      } catch {
+        // OpenCode API not available yet
+      }
+    };
+    
+    // Initial fetch
+    fetchSessionId().then(hasSession => {
+      // If no persisted session, start polling for new sessions
+      if (!hasSession) {
+        sessionPollInterval = setInterval(pollForNewSession, 3000);
+      }
+    });
+    
+    return () => {
+      if (sessionPollInterval) {
+        clearInterval(sessionPollInterval);
+      }
+    };
+  }, [workspace.id, opencodeSessionId]);
 
   // Check if OpenCode is ready by polling via backend proxy
   useEffect(() => {
@@ -312,69 +421,60 @@ export default function WorkspaceClient({ workspace }: WorkspaceClientProps) {
 
           {/* Center section - Panel tabs with open links */}
           <div className="flex items-center gap-1 bg-muted rounded-lg p-0.5">
+            {/* Split toggle */}
             <button
-              onClick={() => setActivePanel('both')}
+              onClick={() => {
+                if (rightPanel === null) {
+                  // Enable split with default panels
+                  const otherPanels = PANELS.filter(p => p.id !== leftPanel);
+                  setRightPanel(otherPanels[0]?.id || 'vscode');
+                } else {
+                  setRightPanel(null);
+                }
+              }}
               className={cn(
                 'px-2 py-1 text-xs rounded transition-all duration-200 flex items-center gap-1.5',
-                activePanel === 'both'
+                rightPanel !== null
                   ? 'bg-background text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
               )}
-              title="Both panels (Alt+1)"
+              title="Toggle split view (Alt+1)"
             >
               <Layout className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Both</span>
+              <span className="hidden sm:inline">Split</span>
             </button>
             
-            <div className="flex items-center">
-              <button
-                onClick={() => setActivePanel('opencode')}
-                className={cn(
-                  'px-2 py-1 text-xs rounded-l transition-all duration-200 flex items-center gap-1.5',
-                  activePanel === 'opencode'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-                title="OpenCode (Alt+2)"
-              >
-                <Bot className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">OpenCode</span>
-              </button>
-              <a
-                href={opencodeUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-1 py-1 text-muted-foreground hover:text-foreground transition-colors"
-                title="Open OpenCode in new tab"
-              >
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
-
-            <div className="flex items-center">
-              <button
-                onClick={() => setActivePanel('vscode')}
-                className={cn(
-                  'px-2 py-1 text-xs rounded-l transition-all duration-200 flex items-center gap-1.5',
-                  activePanel === 'vscode'
-                    ? 'bg-background text-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-                title="VS Code (Alt+3)"
-              >
-                <Code className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">VS Code</span>
-              </button>
-              <a
-                href={vscodeUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-1 py-1 text-muted-foreground hover:text-foreground transition-colors"
-                title="Open VS Code in new tab"
-              >
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            </div>
+            {/* Panel buttons */}
+            {PANELS.map((panel) => {
+              const isActive = leftPanel === panel.id || rightPanel === panel.id;
+              const url = panel.id === 'opencode' ? opencodeUrl : panel.id === 'vscode' ? vscodeUrl : previewUrl;
+              return (
+                <div key={panel.id} className="flex items-center">
+                  <button
+                    onClick={(e) => selectPanel(panel.id, e.shiftKey)}
+                    className={cn(
+                      'px-2 py-1 text-xs rounded-l transition-all duration-200 flex items-center gap-1.5',
+                      isActive
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    )}
+                    title={`${panel.label} (${panel.shortcut}, Shift+click to add to split)`}
+                  >
+                    {panel.icon}
+                    <span className="hidden sm:inline">{panel.label}</span>
+                  </button>
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-1 py-1 text-muted-foreground hover:text-foreground transition-colors"
+                    title={`Open ${panel.label} in new tab`}
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              );
+            })}
           </div>
 
           {/* Right section */}
@@ -434,9 +534,11 @@ export default function WorkspaceClient({ workspace }: WorkspaceClientProps) {
                       </h3>
                       <div className="space-y-1.5 text-xs">
                         {[
-                          ['Both panels', 'Alt+1'],
+                          ['Toggle split', 'Alt+1'],
                           ['OpenCode', 'Alt+2'],
                           ['VS Code', 'Alt+3'],
+                          ['Preview', 'Alt+4'],
+                          ['Add to split', 'Shift+Alt+2/3/4'],
                           ['Header', 'Alt+H'],
                           ['Layout', 'Alt+L'],
                           ['Refresh', 'Alt+R'],
@@ -482,56 +584,73 @@ export default function WorkspaceClient({ workspace }: WorkspaceClientProps) {
         </button>
       )}
 
-      {/* Main content with resizable panels */}
+      {/* Main content with resizable panels - all iframes stay mounted */}
       <div className="flex-1 overflow-hidden">
-        {activePanel === 'both' ? (
+        {rightPanel !== null ? (
           <ResizablePanelGroup orientation={layoutMode} className="h-full">
             <ResizablePanel defaultSize={50} minSize={20}>
-              <IframePanel
-                url={opencodeUrl}
-                isReady={opencodeReady}
+              <PanelContent
+                panel={leftPanel}
+                opencodeUrl={opencodeUrl}
+                vscodeUrl={vscodeUrl}
+                previewUrl={previewUrl}
+                opencodeReady={opencodeReady}
+                vscodeReady={vscodeReady}
                 iframeKey={iframeKey}
-                title="OpenCode"
-                icon={<Bot className="w-4 h-4" />}
               />
             </ResizablePanel>
 
             <ResizableHandle withHandle />
 
             <ResizablePanel defaultSize={50} minSize={20}>
-              <IframePanel
-                url={vscodeUrl}
-                isReady={vscodeReady}
+              <PanelContent
+                panel={rightPanel}
+                opencodeUrl={opencodeUrl}
+                vscodeUrl={vscodeUrl}
+                previewUrl={previewUrl}
+                opencodeReady={opencodeReady}
+                vscodeReady={vscodeReady}
                 iframeKey={iframeKey}
-                title="VS Code"
-                icon={<Code className="w-4 h-4" />}
               />
             </ResizablePanel>
           </ResizablePanelGroup>
         ) : (
           <div className="h-full animate-fade-in">
-            {activePanel === 'opencode' ? (
-              <IframePanel
-                url={opencodeUrl}
-                isReady={opencodeReady}
-                iframeKey={iframeKey}
-                title="OpenCode"
-                icon={<Bot className="w-4 h-4" />}
-              />
-            ) : (
-              <IframePanel
-                url={vscodeUrl}
-                isReady={vscodeReady}
-                iframeKey={iframeKey}
-                title="VS Code"
-                icon={<Code className="w-4 h-4" />}
-              />
-            )}
+            <PanelContent
+              panel={leftPanel}
+              opencodeUrl={opencodeUrl}
+              vscodeUrl={vscodeUrl}
+              previewUrl={previewUrl}
+              opencodeReady={opencodeReady}
+              vscodeReady={vscodeReady}
+              iframeKey={iframeKey}
+            />
           </div>
         )}
       </div>
     </div>
   );
+}
+
+interface PanelContentProps {
+  panel: PanelType;
+  opencodeUrl: string;
+  vscodeUrl: string;
+  previewUrl: string;
+  opencodeReady: boolean;
+  vscodeReady: boolean;
+  iframeKey: number;
+}
+
+function PanelContent({ panel, opencodeUrl, vscodeUrl, previewUrl, opencodeReady, vscodeReady, iframeKey }: PanelContentProps) {
+  const configs: Record<PanelType, { url: string; isReady: boolean; title: string; icon: React.ReactNode }> = {
+    opencode: { url: opencodeUrl, isReady: opencodeReady, title: 'OpenCode', icon: <Bot className="w-4 h-4" /> },
+    vscode: { url: vscodeUrl, isReady: vscodeReady, title: 'VS Code', icon: <Code className="w-4 h-4" /> },
+    preview: { url: previewUrl, isReady: true, title: 'Preview', icon: <Eye className="w-4 h-4" /> },
+  };
+  const config = configs[panel];
+  // Use panel as key to preserve iframe state when switching panels (not iframeKey which reloads)
+  return <IframePanel key={panel} url={config.url} isReady={config.isReady} iframeKey={iframeKey} title={config.title} icon={config.icon} />;
 }
 
 interface IframePanelProps {

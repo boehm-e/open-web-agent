@@ -67,6 +67,7 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
   const networkName = `workspace-${workspaceId}`;
   const mainNetwork = 'open-web-agent-2_web';
   const volumeName = `workspace-${workspaceId}-data`;
+  const opencodeDataVolume = `workspace-${workspaceId}-opencode`;
 
   // Clone repository URL with token if provided
   const repoUrl = githubToken
@@ -94,6 +95,15 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
     // Create Docker volume for workspace data
     await docker.createVolume({
       Name: volumeName,
+      Driver: 'local',
+      Labels: {
+        'workspace.id': workspaceId,
+      },
+    });
+
+    // Create Docker volume for OpenCode data (conversation history, sessions)
+    await docker.createVolume({
+      Name: opencodeDataVolume,
       Driver: 'local',
       Labels: {
         'workspace.id': workspaceId,
@@ -314,28 +324,31 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
     }
 
     // Create OpenCode container
+    // Exposes port 3001 for OpenCode web UI and port 3000 for dev server preview
     const opencodeContainer = await docker.createContainer({
       name: `opencode-${workspaceId}`,
       Image: opencodeImage,
       Env: opencodeEnv,
       Entrypoint: ['sh', '-c'],
       Cmd: [
-        // Install git and github-cli, set up opencode.json config, set up skills, then run opencode
+        // Install git, github-cli, nodejs/npm for running dev servers, and sqlite for session queries
         // Git credentials are configured via GITHUB_TOKEN/GH_TOKEN env vars
         // LLM provider API keys are configured via environment variables
-        `apk add --no-cache git github-cli` +
+        `apk add --no-cache git github-cli nodejs npm python3 sqlite` +
         ` && ${opencodeConfigCommand}` +
         (skillsSetupCommands ? ` && ${skillsSetupCommands}` : '') +
         ` && cd /workspace && exec opencode web --port 3001 --hostname 0.0.0.0`
       ],
       ExposedPorts: {
         '3001/tcp': {},
+        '3000/tcp': {}, // Preview port for dev servers
       },
       HostConfig: {
         // No PortBindings - Traefik routes via Docker network, no host ports needed
         // Skills are set up in ~/.config/opencode/skills/ during container startup
         Binds: [
-          `${volumeName}:/workspace`
+          `${volumeName}:/workspace`,
+          `${opencodeDataVolume}:/root/.local/share/opencode`  // Persist conversation history
         ],
         NetworkMode: networkName,
         RestartPolicy: {
@@ -348,11 +361,26 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
       Labels: {
         'traefik.enable': 'true',
         'traefik.docker.network': mainNetwork,
+        // OpenCode web UI router (port 3001)
         [`traefik.http.routers.opencode-${workspaceId}.rule`]:
           `Host(\`opencode-${workspaceId}.${domain}\`)`,
+        [`traefik.http.routers.opencode-${workspaceId}.service`]:
+          `opencode-${workspaceId}`,
+        [`traefik.http.routers.opencode-${workspaceId}.entrypoints`]: 'web',
         [`traefik.http.services.opencode-${workspaceId}.loadbalancer.server.port`]:
           '3001',
-        [`traefik.http.routers.opencode-${workspaceId}.entrypoints`]: 'web',
+        // Preview router for dev server (port 3000)
+        [`traefik.http.routers.preview-${workspaceId}.rule`]:
+          `Host(\`preview-${workspaceId}.${domain}\`)`,
+        [`traefik.http.routers.preview-${workspaceId}.service`]:
+          `preview-${workspaceId}`,
+        [`traefik.http.routers.preview-${workspaceId}.entrypoints`]: 'web',
+        [`traefik.http.services.preview-${workspaceId}.loadbalancer.server.port`]:
+          '3000',
+        // Middleware to remove X-Frame-Options so preview can be embedded in iframe
+        [`traefik.http.middlewares.preview-headers-${workspaceId}.headers.customResponseHeaders.X-Frame-Options`]: '',
+        [`traefik.http.middlewares.preview-headers-${workspaceId}.headers.customResponseHeaders.Content-Security-Policy`]: '',
+        [`traefik.http.routers.preview-${workspaceId}.middlewares`]: `preview-headers-${workspaceId}`,
         'workspace.id': workspaceId,
       },
     });
@@ -446,6 +474,7 @@ export async function removeWorkspaceContainer(workspaceId: string) {
 async function cleanupWorkspace(workspaceId: string) {
   const networkName = `workspace-${workspaceId}`;
   const volumeName = `workspace-${workspaceId}-data`;
+  const opencodeDataVolume = `workspace-${workspaceId}-opencode`;
 
   try {
     // Try to remove init container if it still exists
@@ -465,6 +494,13 @@ async function cleanupWorkspace(workspaceId: string) {
   try {
     const volume = docker.getVolume(volumeName);
     await volume.remove().catch(() => { });
+  } catch {
+    // Volume might not exist
+  }
+
+  try {
+    const opencodeVolume = docker.getVolume(opencodeDataVolume);
+    await opencodeVolume.remove().catch(() => { });
   } catch {
     // Volume might not exist
   }
