@@ -70,17 +70,17 @@ export default function WorkspaceClient({ workspace, domain }: WorkspaceClientPr
   // Determine protocol based on current page (works for both localhost and production)
   const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'https' : 'http';
   
-  // URLs use path-based routing: /ws/{workspaceId}/{service}
-  const opencodeBaseUrl = `${protocol}://${domain}/ws/${workspace.id}/opencode`;
+  // URLs use subdomain routing: {service}-{workspaceId}.{domain}
+  const opencodeBaseUrl = `${protocol}://opencode-${workspace.id}.${domain}`;
   // OpenCode URL - include session ID if we have one persisted
   const opencodeUrl = opencodeSessionId
     ? `${opencodeBaseUrl}/${WORKSPACE_PATH_ENCODED}/session/${opencodeSessionId}`
     : `${opencodeBaseUrl}/${WORKSPACE_PATH_ENCODED}/session`;
   
-  const vscodeUrl = `${protocol}://${domain}/ws/${workspace.id}/vscode`;
+  const vscodeUrl = `${protocol}://vscode-${workspace.id}.${domain}`;
   
   // Preview URL for live dev server (port 3000 in container)
-  const previewUrl = `${protocol}://${domain}/ws/${workspace.id}/preview`;
+  const previewUrl = `${protocol}://preview-${workspace.id}.${domain}`;
 
   const copyPassword = async () => {
     if (workspace.vscodePassword) {

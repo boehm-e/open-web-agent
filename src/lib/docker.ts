@@ -302,13 +302,10 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
       Labels: {
         'traefik.enable': 'true',
         'traefik.docker.network': mainNetwork,
-        // Path-based routing: /ws/{workspaceId}/vscode
-        [`traefik.http.routers.vscode-${workspaceId}.rule`]: `Host(\`${domain}\`) && PathPrefix(\`/ws/${workspaceId}/vscode\`)`,
+        // Subdomain routing: vscode-{workspaceId}.{domain}
+        [`traefik.http.routers.vscode-${workspaceId}.rule`]: `Host(\`vscode-${workspaceId}.${domain}\`)`,
         [`traefik.http.routers.vscode-${workspaceId}.entrypoints`]: 'web',
         [`traefik.http.services.vscode-${workspaceId}.loadbalancer.server.port`]: '8443',
-        // Strip the path prefix before forwarding to code-server
-        [`traefik.http.middlewares.vscode-strip-${workspaceId}.stripprefix.prefixes`]: `/ws/${workspaceId}/vscode`,
-        [`traefik.http.routers.vscode-${workspaceId}.middlewares`]: `vscode-strip-${workspaceId}`,
         'workspace.id': workspaceId,
       },
     });
@@ -365,30 +362,26 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
       Labels: {
         'traefik.enable': 'true',
         'traefik.docker.network': mainNetwork,
-        // OpenCode web UI router (port 3001) - path-based: /ws/{workspaceId}/opencode
+        // OpenCode web UI router (port 3001) - subdomain: opencode-{workspaceId}.{domain}
         [`traefik.http.routers.opencode-${workspaceId}.rule`]:
-          `Host(\`${domain}\`) && PathPrefix(\`/ws/${workspaceId}/opencode\`)`,
+          `Host(\`opencode-${workspaceId}.${domain}\`)`,
         [`traefik.http.routers.opencode-${workspaceId}.service`]:
           `opencode-${workspaceId}`,
         [`traefik.http.routers.opencode-${workspaceId}.entrypoints`]: 'web',
         [`traefik.http.services.opencode-${workspaceId}.loadbalancer.server.port`]:
           '3001',
-        // Strip prefix for opencode
-        [`traefik.http.middlewares.opencode-strip-${workspaceId}.stripprefix.prefixes`]: `/ws/${workspaceId}/opencode`,
-        [`traefik.http.routers.opencode-${workspaceId}.middlewares`]: `opencode-strip-${workspaceId}`,
-        // Preview router for dev server (port 3000) - path-based: /ws/{workspaceId}/preview
+        // Preview router for dev server (port 3000) - subdomain: preview-{workspaceId}.{domain}
         [`traefik.http.routers.preview-${workspaceId}.rule`]:
-          `Host(\`${domain}\`) && PathPrefix(\`/ws/${workspaceId}/preview\`)`,
+          `Host(\`preview-${workspaceId}.${domain}\`)`,
         [`traefik.http.routers.preview-${workspaceId}.service`]:
           `preview-${workspaceId}`,
         [`traefik.http.routers.preview-${workspaceId}.entrypoints`]: 'web',
         [`traefik.http.services.preview-${workspaceId}.loadbalancer.server.port`]:
           '3000',
-        // Strip prefix and remove X-Frame-Options for preview
-        [`traefik.http.middlewares.preview-strip-${workspaceId}.stripprefix.prefixes`]: `/ws/${workspaceId}/preview`,
+        // Remove X-Frame-Options for preview
         [`traefik.http.middlewares.preview-headers-${workspaceId}.headers.customResponseHeaders.X-Frame-Options`]: '',
         [`traefik.http.middlewares.preview-headers-${workspaceId}.headers.customResponseHeaders.Content-Security-Policy`]: '',
-        [`traefik.http.routers.preview-${workspaceId}.middlewares`]: `preview-strip-${workspaceId},preview-headers-${workspaceId}`,
+        [`traefik.http.routers.preview-${workspaceId}.middlewares`]: `preview-headers-${workspaceId}`,
         'workspace.id': workspaceId,
       },
     });
