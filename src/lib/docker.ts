@@ -469,6 +469,15 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
         [`traefik.http.routers.opencode-${workspaceId}.entrypoints`]: 'web',
         [`traefik.http.services.opencode-${workspaceId}.loadbalancer.server.port`]:
           '3001',
+        // SSE/streaming middleware - disable buffering for LLM streaming
+        [`traefik.http.middlewares.opencode-streaming-${workspaceId}.buffering.maxRequestBodyBytes`]: '0',
+        [`traefik.http.middlewares.opencode-streaming-${workspaceId}.buffering.maxResponseBodyBytes`]: '0',
+        [`traefik.http.middlewares.opencode-streaming-${workspaceId}.buffering.memRequestBodyBytes`]: '0',
+        [`traefik.http.middlewares.opencode-streaming-${workspaceId}.buffering.memResponseBodyBytes`]: '0',
+        [`traefik.http.middlewares.opencode-headers-${workspaceId}.headers.customResponseHeaders.X-Accel-Buffering`]: 'no',
+        [`traefik.http.middlewares.opencode-headers-${workspaceId}.headers.customResponseHeaders.Cache-Control`]: 'no-cache',
+        [`traefik.http.middlewares.opencode-headers-${workspaceId}.headers.customResponseHeaders.X-Frame-Options`]: '',
+        [`traefik.http.routers.opencode-${workspaceId}.middlewares`]: `opencode-streaming-${workspaceId},opencode-headers-${workspaceId}`,
         // Preview router for dev server (port 3000) - subdomain: preview-{workspaceId}.{domain}
         [`traefik.http.routers.preview-${workspaceId}.rule`]:
           `Host(\`preview-${workspaceId}.${domain}\`)`,
