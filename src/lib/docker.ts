@@ -454,8 +454,8 @@ export async function createWorkspaceContainer(config: WorkspaceContainerConfig)
         RestartPolicy: {
           Name: 'unless-stopped',
         },
-        Memory: 4 * 1024 * 1024 * 1024,
-        NanoCpus: 2 * 1000000000,
+        Memory: 8 * 1024 * 1024 * 1024, // 8GB for Next.js dev + OpenCode
+        NanoCpus: 4 * 1000000000, // 4 CPUs for better dev experience
       },
 
       Labels: {
