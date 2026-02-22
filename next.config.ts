@@ -63,9 +63,10 @@ const nextConfig: NextConfig = {
             key: 'Cache-Control',
             value: 'no-cache, no-store, must-revalidate',
           },
+          // Relaxed CSP for service worker to allow external resources
           {
             key: 'Content-Security-Policy',
-            value: "default-src 'self'; script-src 'self'",
+            value: "default-src 'self'; script-src 'self'; connect-src 'self' https://avatars.githubusercontent.com https://github.com; img-src 'self' https://avatars.githubusercontent.com data:;",
           },
         ],
       },

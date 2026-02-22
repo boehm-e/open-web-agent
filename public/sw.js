@@ -34,26 +34,34 @@ self.addEventListener('activate', (event) => {
 
 // Fetch event - serve from cache, fallback to network
 self.addEventListener('fetch', (event) => {
+  const request = event.request;
+  const url = new URL(request.url);
+
   // Skip non-GET requests
-  if (event.request.method !== 'GET') {
+  if (request.method !== 'GET') {
     return;
   }
 
   // Skip API requests - always fetch from network
-  if (event.request.url.includes('/api/')) {
+  if (url.pathname.startsWith('/api/')) {
+    return;
+  }
+
+  // Skip external requests - let them go through normally
+  if (url.origin !== location.origin) {
     return;
   }
 
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
+    caches.match(request).then((cachedResponse) => {
       if (cachedResponse) {
         // Return cached response and update cache in background
         event.waitUntil(
-          fetch(event.request).then((response) => {
+          fetch(request).then((response) => {
             if (response && response.status === 200) {
               const responseClone = response.clone();
               caches.open(CACHE_NAME).then((cache) => {
-                cache.put(event.request, responseClone);
+                cache.put(request, responseClone);
               });
             }
           }).catch(() => {
@@ -64,7 +72,7 @@ self.addEventListener('fetch', (event) => {
       }
 
       // Not in cache, fetch from network
-      return fetch(event.request).then((response) => {
+      return fetch(request).then((response) => {
         // Don't cache non-successful responses
         if (!response || response.status !== 200 || response.type !== 'basic') {
           return response;
@@ -75,13 +83,13 @@ self.addEventListener('fetch', (event) => {
 
         // Cache the fetched response
         caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseClone);
+          cache.put(request, responseClone);
         });
 
         return response;
       }).catch(() => {
         // Return offline page for navigation requests
-        if (event.request.mode === 'navigate') {
+        if (request.mode === 'navigate') {
           return caches.match('/');
         }
         return new Response('Offline', { status: 503 });
