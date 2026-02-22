@@ -1,7 +1,6 @@
 const CACHE_NAME = 'open-web-agent-v1';
 
 const STATIC_ASSETS = [
-  '/',
   '/dashboard',
   '/environments',
   '/icons/icon-192x192.png',
@@ -90,7 +89,7 @@ self.addEventListener('fetch', (event) => {
       }).catch(() => {
         // Return offline page for navigation requests
         if (request.mode === 'navigate') {
-          return caches.match('/');
+          return caches.match('/dashboard');
         }
         return new Response('Offline', { status: 503 });
       });
